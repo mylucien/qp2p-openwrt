@@ -1,0 +1,3 @@
+# 这是一个 OpenWrt feed：所有文件在 Linux 构建机上被 make / sh 直接读取，
+# 必须保持 LF。Windows 上 checkout 时不要转 CRLF，否则 shebang 和 Makefile 都会坏。
+* text=auto eol=lf
