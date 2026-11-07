@@ -57,8 +57,6 @@ PKG_SOURCE_URL:=https://github.com/$(QP2P_REPO)/releases/download/v$(QP2P_TAG_FU
 PKG_HASH:=skip
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
-PKGARCH:=$(ARCH)
-
 include $(INCLUDE_DIR)/package.mk
 
 define Package/qp2p
@@ -105,6 +103,12 @@ define Build/Prepare
 	else \
 		echo "WARNING: 没取到 SHA256SUMS.txt，本次跳过校验"; \
 	fi
+endef
+
+# 这个包没有源码，只有已经下好的二进制。不清空编译步骤的话，默认实现会去
+# $(PKG_BUILD_DIR) 里找 Makefile，然后报 "No targets specified and no makefile found"。
+define Build/Compile
+endef
 
 define Package/qp2p/install
 	$(INSTALL_DIR) $(1)/usr/bin
