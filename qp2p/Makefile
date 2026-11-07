@@ -16,21 +16,28 @@ PKG_LICENSE:=MIT
 PKG_MAINTAINER:=lucien
 
 QP2P_REPO:=mylucien/qp2p
-QP2P_API:=https://api.github.com/repos/$(QP2P_REPO)/releases?per_page=1
+QP2P_API:=https://api.github.com/repos/$(QP2P_REPO)/releases?per_page=20
 QP2P_TAG_CACHE:=$(TOPDIR)/tmp/.qp2p-latest-tag
 
-# 取最新 tag（去掉前导 v）。缓存文件 30 分钟内视为新鲜，避免 make 每次解析都打网络。
+# 取最新的 tag（去掉前导 v），缓存 30 分钟，避免 make 每次解析都打网络。
 #
-# 用 /releases?per_page=1 而不是 /releases/latest：CI 每次 push 发的是
-# 预发布（v0.1.2+57），而 latest 接口会跳过预发布，那样永远取不到新构建。
+# 两处坑：
+#   1. 不能用 /releases/latest —— 它跳过预发布，而 CI 每次 push 发的都是预发布
+#   2. /releases 的返回顺序看着像按 tag 排，不是按时间；真正最新的一条未必在最前面
+# 所以取一页（20 条），按 published_at 自己排一遍再取最后一条。
 QP2P_TAG_FULL:=$(strip $(shell \
 	if [ -s "$(QP2P_TAG_CACHE)" ] && [ -z "$$(find "$(QP2P_TAG_CACHE)" -mmin +30 2>/dev/null)" ]; then \
 		cat "$(QP2P_TAG_CACHE)"; \
 	else \
 		mkdir -p "$(TOPDIR)/tmp" 2>/dev/null; \
-		curl -fsSL --max-time 20 "$(QP2P_API)" 2>/dev/null \
-			| sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' \
-			| head -n1 | tee "$(QP2P_TAG_CACHE)" 2>/dev/null; \
+		curl -fsSL --max-time 25 "$(QP2P_API)" 2>/dev/null \
+			| awk ' \
+				/"tag_name":/     { t = $$0; sub(/^.*"tag_name": *"/, "", t); sub(/".*$$/, "", t) } \
+				/"published_at":/ { p = $$0; sub(/^.*"published_at": *"/, "", p); sub(/".*$$/, "", p); \
+				                    if (p ~ /^[0-9]/) print p "\t" t }' \
+			| sort | tail -n1 | cut -f2 \
+			| sed 's/^v//' \
+			| tee "$(QP2P_TAG_CACHE)" 2>/dev/null; \
 	fi))
 
 # tag 形如 0.1.2+57：+ 后面是 CI 的构建号，不算版本号的一部分（资产名里也没有它），

@@ -52,18 +52,19 @@ make package/luci-app-qp2p/compile V=s
 
 版本是**编译时**从 GitHub API 取的最新 release，缓存 30 分钟：
 
-- 查的是 `/releases?per_page=1`（**不是** `/releases/latest`）——
-  上游 CI 每次 push 发的是预发布 `v0.1.2+57`，`latest` 接口会跳过预发布，
-  用它就永远取不到新构建。
+- 不能查 `/releases/latest` —— 它跳过预发布，而上游 CI 每次 push 发的都是预发布；
+- 也不能只取 `/releases?per_page=1` 的第一条 —— 那个接口的返回顺序不是按时间，
+  真正最新的一条不一定在最前面（实测 `v0.1.2+78` 排在 `v0.1.2` 后面）；
+- 所以拉一页（20 条），按 `published_at` 自己排，取最后一条。
 - 缓存文件：`tmp/.qp2p-latest-tag`，想立刻重新取就删掉它
 - 想锁定某个版本：`make package/qp2p/compile QP2P_TAG_FULL=0.1.2`
 - 离线编译会直接报错（版本号拿不到），这是有意的
 
-tag 里的 `+57` 是 CI 的构建号：
+tag 里的 `+78` 是 CI 的构建号：
 
 | tag | `PKG_VERSION` | `PKG_RELEASE` | ipk 文件名 |
 |---|---|---|---|
-| `v0.1.2+57` | `0.1.2` | `57` | `qp2p_0.1.2-57_aarch64_cortex-a53.ipk` |
+| `v0.1.2+78` | `0.1.2` | `78` | `qp2p_0.1.2-78_aarch64_cortex-a53.ipk` |
 | `v0.1.3`（正式版） | `0.1.3` | `1` | `qp2p_0.1.3-1_aarch64_cortex-a53.ipk` |
 
 构建号不进资产名（资产还是 `qp2p-0.1.2-linux-aarch64-static`），但要进
