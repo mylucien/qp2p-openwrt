@@ -1,0 +1,7 @@
+#!/bin/sh
+# 首次安装时把数据目录权限收紧。身份私钥和加入令牌都放在这里。
+[ -d /etc/qp2p ] || mkdir -p /etc/qp2p
+chmod 0700 /etc/qp2p 2>/dev/null
+chmod 0600 /etc/qp2p/* 2>/dev/null
+
+exit 0

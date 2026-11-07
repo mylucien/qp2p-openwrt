@@ -1,0 +1,433 @@
+#!/bin/sh
+# qp2p 控制脚本 —— init 脚本和 LuCI 都只调它，避免同一套逻辑写两遍。
+#
+# 约定：
+#   * UCI（/etc/config/qp2p）是用户设置的唯一来源，apply 时同步进 config.toml
+#   * 令牌、私钥、证书只存在 /etc/qp2p/（qp2p 自己写的 0600 文件），UCI 里不留副本
+#   * 输出：state / refresh 给 JSON，其余动作给 CLI 的原始文本（LuCI 直接显示）
+
+set -u
+
+PROG=/usr/bin/qp2p
+DATA_DIR=/etc/qp2p
+STATE_DIR=/var/run
+PIDFILE=$STATE_DIR/qp2p.pid
+PEERS_CACHE=$STATE_DIR/qp2p-peers
+LINKS_CACHE=$STATE_DIR/qp2p-links
+NFT_FILE=/usr/share/nftables.d/ruleset-post/10-qp2p.nft
+
+# ---------------------------------------------------------------- 基础
+
+uci_get() { uci -q get "qp2p.main.$1" 2>/dev/null; }
+
+uci_get_bool() {
+	local v
+
+	v=$(uci -q get "qp2p.main.$1" 2>/dev/null)
+	[ -n "$v" ] || v=$2
+	case "$v" in
+		1|on|true|yes|enabled) echo 1 ;;
+		*) echo 0 ;;
+	esac
+}
+
+# JSON 字符串转义（含换行）。值都来自我们自己，只处理会让 JSON 解析失败的字符。
+jstr() {
+	printf '"%s"' "$(printf '%s' "${1:-}" | awk '
+		BEGIN { ORS = "" }
+		{
+			gsub(/\\/, "\\\\")
+			gsub(/"/, "\\\"")
+			gsub(/\t/, " ")
+			gsub(/\r/, "")
+			if (NR > 1) printf "\\n"
+			printf "%s", $0
+		}')"
+}
+
+is_running() {
+	[ -f "$PIDFILE" ] || return 1
+	[ -n "$(cat "$PIDFILE" 2>/dev/null)" ] || return 1
+	kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null
+}
+
+# 从 `qp2p config` 的文本里取几项。全是本地信息，不发网络请求。
+# 结果放在 worker / net / cidr / vip / token_hint 里。
+read_config() {
+	local line rest
+
+	worker=''; net=''; cidr=''; vip=''; token_hint=''
+
+	while IFS= read -r line; do
+		case "$line" in
+			"信令服务 : "*)	worker=${line#信令服务 : } ;;
+			"网络     : "*)	rest=${line#网络     : } ;;
+			"虚拟地址 : "*)	vip=${line#虚拟地址 : } ;;
+			"加入令牌 : "*)	token_hint=${line#加入令牌 : } ;;
+		esac
+	done <<-EOF
+	$($PROG config --data-dir "$DATA_DIR" 2>/dev/null)
+	EOF
+
+	if [ -n "${rest:-}" ]; then
+		rest=$(printf '%s' "$rest" | tr -s ' ')
+		net=${rest%% *}
+		[ "$net" != "$rest" ] && cidr=${rest#* }
+	fi
+	[ "$vip" = "由服务端分配" ] && vip=''
+}
+
+# 直连信息只能从日志里读：CLI 没有 --json，status 也不吐 rtt。
+read_links() {
+	: > "$LINKS_CACHE"
+	logread 2>/dev/null | grep -a '直连已建立' | tail -n 100 \
+		| sed -n 's/.*直连已建立：\(.*\) (\([0-9.]*\)) rtt=\([0-9.]*\)ms.*/\1|\3/p' \
+		>> "$LINKS_CACHE" 2>/dev/null || true
+}
+
+link_rtt() {
+	[ -s "$LINKS_CACHE" ] || return 0
+	grep -F "$1|" "$LINKS_CACHE" 2>/dev/null | tail -n 1 | cut -d'|' -f2
+}
+
+# ---------------------------------------------------------------- 状态
+
+peers_json() {
+	local sep p_name p_ip p_state p_cands p_rtt
+
+	printf '['
+	[ -s "$PEERS_CACHE" ] || { printf ']'; return 0; }
+
+	sep=''
+	while IFS='|' read -r p_name p_ip p_state p_cands; do
+		[ -n "$p_name" ] || continue
+		p_rtt=$(link_rtt "$p_name")
+		printf '%s{"name":%s,"ip":%s,"state":%s,"cands":%s,"rtt":%s}' \
+			"$sep" "$(jstr "$p_name")" "$(jstr "$p_ip")" "$(jstr "$p_state")" \
+			"${p_cands:-0}" \
+			"$(if [ -n "$p_rtt" ]; then printf '"%s"' "$p_rtt"; else printf 'null'; fi)"
+		sep=','
+	done < "$PEERS_CACHE"
+	printf ']'
+}
+
+do_state() {
+	local running=0 enabled joined=0 version dev mtu bind port idle routes stun
+	local lan_access peer_to_lan lan_zone
+
+	is_running && running=1
+	enabled=$(uci_get_bool enabled 0)
+	[ -s "$DATA_DIR/config.toml" ] && joined=1
+
+	version=$($PROG -V 2>/dev/null | sed -n 's/^qp2p \([^ ]*\).*/\1/p')
+
+	read_config
+	read_links
+
+	dev=$(uci_get dev);		dev=${dev:-qp2p0}
+	mtu=$(uci_get mtu);		mtu=${mtu:-1400}
+	bind=$(uci_get bind);		bind=${bind:-0.0.0.0}
+	port=$(uci_get port);		port=${port:-51820}
+	idle=$(uci_get idle);		idle=${idle:-0}
+	routes=$(uci_get routes)
+	stun=$(uci_get stun)
+	lan_access=$(uci_get_bool lan_access 1)
+	peer_to_lan=$(uci_get_bool peer_to_lan 0)
+	lan_zone=$(uci_get lan_zone);	lan_zone=${lan_zone:-lan}
+
+	cat <<EOF
+{"running":$running,"enabled":$enabled,"joined":$joined,"version":$(jstr "$version"),
+"worker":$(jstr "$worker"),"net":$(jstr "$net"),"cidr":$(jstr "$cidr"),"ip":$(jstr "$vip"),
+"token_hint":$(jstr "$token_hint"),
+"dev":$(jstr "$dev"),"mtu":$mtu,"bind":$(jstr "$bind"),"port":$port,"idle":$idle,
+"routes":$(jstr "$routes"),"stun":$(jstr "$stun"),
+"lan_access":$lan_access,"peer_to_lan":$peer_to_lan,"lan_zone":$(jstr "$lan_zone"),
+"peers":$(peers_json)}
+EOF
+}
+
+# 向信令服务要一次成员列表 → 写缓存 → 吐 state。
+do_refresh() {
+	local out err
+
+	out=$($PROG status --data-dir "$DATA_DIR" 2>&1)
+	err=$?
+	if [ $err -ne 0 ]; then
+		printf '{"ok":0,"error":%s,"state":' "$(jstr "$out")"
+		do_state
+		printf '}\n'
+		return 1
+	fi
+
+	# 表格列宽是「左对齐 16/16/7 再补空格」，名字超长会被截断成「…」，
+	# 状态里还可能带空格（「离线12 分钟」），所以先剥掉末尾的候选数，
+	# 再按 IP 定位切三段。
+	printf '%s\n' "$out" | awk '
+		function rtrim(s) { sub(/[ \t]+$/, "", s); return s }
+		{
+			l = $0
+			sub(/^[ \t]+/, "", l)
+
+			cands = ""
+			if (match(l, /[ \t]+[0-9]+$/)) {
+				cands = substr(l, RSTART, RLENGTH)
+				sub(/^[ \t]+/, "", cands)
+				l = substr(l, 1, RSTART - 1)
+			}
+
+			if (!match(l, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) next
+
+			ip = substr(l, RSTART, RLENGTH)
+			state = substr(l, RSTART + RLENGTH)
+			sub(/^[ \t]+/, "", state)
+			name = rtrim(substr(l, 1, RSTART - 1))
+
+			if (name != "") print name "|" ip "|" state "|" cands
+		}' > "$PEERS_CACHE"
+
+	printf '{"ok":1,"raw":%s,"state":' "$(jstr "$out")"
+	do_state
+	printf '}\n'
+}
+
+# ---------------------------------------------------------------- UCI → config.toml
+
+do_apply() {
+	local v bind port listen
+
+	[ -x "$PROG" ] || { echo "缺少 $PROG"; return 1; }
+	mkdir -p "$DATA_DIR"
+
+	v=$(uci_get worker)
+	if [ -n "$v" ]; then
+		$PROG config set worker "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1 \
+			|| { echo "信令地址不合法：$v（要以 http:// 或 https:// 开头）"; return 1; }
+	fi
+
+	v=$(uci_get name)
+	if [ -n "$v" ]; then
+		$PROG config set node_name "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1
+	else
+		$PROG config unset node_name --data-dir "$DATA_DIR" >/dev/null 2>&1
+	fi
+
+	bind=$(uci_get bind);	bind=${bind:-0.0.0.0}
+	port=$(uci_get port);	port=${port:-51820}
+	listen="$bind:$port"
+	$PROG config set listen "$listen" --data-dir "$DATA_DIR" >/dev/null 2>&1 \
+		|| { echo "监听地址不合法：$listen"; return 1; }
+
+	v=$(uci_get mtu);	[ -n "$v" ] && $PROG config set mtu "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1
+	v=$(uci_get dev);	[ -n "$v" ] && $PROG config set dev "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1
+	v=$(uci_get idle);	[ -n "$v" ] && $PROG config set idle "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1
+	v=$(uci_get stun);	[ -n "$v" ] && $PROG config set stun "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1
+
+	v=$(uci_get routes)
+	if [ -n "$v" ]; then
+		$PROG config set routes "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1 \
+			|| { echo "路由格式不对：$v（要写成 192.168.1.0/24）"; return 1; }
+	else
+		$PROG config unset routes --data-dir "$DATA_DIR" >/dev/null 2>&1
+	fi
+
+	# 虚拟地址只有入网之后才谈得上
+	v=$(uci_get ip)
+	if [ -s "$DATA_DIR/config.toml" ]; then
+		if [ -n "$v" ]; then
+			$PROG config set ip "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1 \
+				|| { echo "虚拟地址 $v 不可用（不在本网络网段里？）"; return 1; }
+		else
+			$PROG config unset ip --data-dir "$DATA_DIR" >/dev/null 2>&1
+		fi
+	fi
+
+	echo "✓ 设置已写入 $DATA_DIR/config.toml"
+}
+
+# ---------------------------------------------------------------- 入网 / 建网 / 换令牌
+
+do_join() {
+	local token worker out
+
+	token=${1:-}
+	[ -n "$token" ] || { echo "缺少加入令牌"; return 1; }
+
+	worker=$(uci_get worker)
+	[ -n "$worker" ] || { echo "先填信令服务器地址再入网"; return 1; }
+
+	# 先把名字/地址写进 config.toml，join 登记时用的就是这些值
+	do_apply >/dev/null 2>&1
+
+	out=$($PROG join "$token" --worker "$worker" --data-dir "$DATA_DIR" 2>&1) || {
+		printf '%s\n' "$out"
+		return 1
+	}
+	printf '%s\n' "$out"
+
+	# 入网后虚拟地址才有意义，再补一次
+	do_apply >/dev/null 2>&1
+}
+
+do_create() {
+	local name secret worker out
+
+	name=${1:-}
+	secret=${2:-${QP2P_ADMIN_SECRET:-}}
+	[ -n "$name" ] || { echo "缺少网络名（只能用小写字母、数字和连字符）"; return 1; }
+	worker=$(uci_get worker)
+	[ -n "$worker" ] || { echo "先填信令服务器地址"; return 1; }
+	[ -n "$secret" ] || { echo "建网需要管理密钥（ADMIN_SECRET）"; return 1; }
+
+	do_apply >/dev/null 2>&1
+
+	out=$(QP2P_ADMIN_SECRET="$secret" \
+		$PROG create "$name" --worker "$worker" --data-dir "$DATA_DIR" 2>&1) || {
+		printf '%s\n' "$out"
+		return 1
+	}
+	printf '%s\n' "$out"
+
+	do_apply >/dev/null 2>&1
+}
+
+do_rotate() {
+	local secret key worker out
+
+	secret=${1:-${QP2P_ADMIN_SECRET:-}}
+	key=${2:-}
+	worker=$(uci_get worker)
+	[ -n "$secret" ] || { echo "换令牌需要管理密钥（ADMIN_SECRET）"; return 1; }
+
+	if [ -n "$key" ]; then
+		out=$(QP2P_ADMIN_SECRET="$secret" \
+			$PROG rotate --worker "$worker" --key "$key" --data-dir "$DATA_DIR" 2>&1)
+	else
+		out=$(QP2P_ADMIN_SECRET="$secret" \
+			$PROG rotate --worker "$worker" --data-dir "$DATA_DIR" 2>&1)
+	fi
+	printf '%s\n' "$out"
+}
+
+do_leave()	{ $PROG leave --data-dir "$DATA_DIR" 2>&1; }
+do_token()	{ $PROG token --data-dir "$DATA_DIR" 2>&1; }
+do_doctor()	{ $PROG doctor --data-dir "$DATA_DIR" 2>&1; }
+
+# 服务的 stdout/stderr 由 procd 打进 syslog，tag 就是实例名 qp2p。
+do_log() {
+	local lines out
+
+	lines=${1:-200}
+	out=$(logread 2>/dev/null | grep -a 'qp2p' | tail -n "$lines")
+	# 有的固件 syslog 里不带 tag，退化成不限关键字，至少让用户看到东西
+	[ -n "$out" ] || out=$(logread 2>/dev/null | tail -n "$lines")
+	printf '%s\n' "$out"
+}
+
+# ---------------------------------------------------------------- 防火墙
+
+do_firewall() {
+	local dev lan_zone lan_access peer_to_lan cidr
+
+	dev=$(uci_get dev);		dev=${dev:-qp2p0}
+	lan_zone=$(uci_get lan_zone);	lan_zone=${lan_zone:-lan}
+	lan_access=$(uci_get_bool lan_access 1)
+	peer_to_lan=$(uci_get_bool peer_to_lan 0)
+	read_config
+
+	# 幂等：先删干净再按当前开关重建
+	uci -q delete firewall.qp2p
+	uci -q delete firewall.qp2p_lan_in
+	uci -q delete firewall.qp2p_lan_out
+
+	if [ "$lan_access" = 1 ] || [ "$peer_to_lan" = 1 ]; then
+		uci set firewall.qp2p=zone
+		uci set firewall.qp2p.name='qp2p'
+		uci set firewall.qp2p.input='ACCEPT'
+		uci set firewall.qp2p.output='ACCEPT'
+		uci set firewall.qp2p.forward='ACCEPT'
+		uci set firewall.qp2p.family='ipv4'
+		uci set firewall.qp2p.device="$dev"
+	fi
+
+	if [ "$lan_access" = 1 ]; then
+		# 局域网设备访问对端虚拟地址：源地址换成路由器自己的虚拟地址，
+		# 否则对端回了包也不知道往哪送
+		uci set firewall.qp2p.masq='1'
+		uci set firewall.qp2p.mtu_fix='1'
+		uci set firewall.qp2p_lan_in=forwarding
+		uci set firewall.qp2p_lan_in.src="$lan_zone"
+		uci set firewall.qp2p_lan_in.dest='qp2p'
+	fi
+
+	if [ "$peer_to_lan" = 1 ]; then
+		uci set firewall.qp2p_lan_out=forwarding
+		uci set firewall.qp2p_lan_out.src='qp2p'
+		uci set firewall.qp2p_lan_out.dest="$lan_zone"
+	fi
+
+	uci commit firewall
+
+	# 对端访问本机内网时的回程 SNAT。zone 上的 masq 只管「离开这个 zone」的方向，
+	# 管不到「进来再转去 lan」，所以单独补一条 nft 规则。
+	if [ "$peer_to_lan" = 1 ] && [ -n "$cidr" ]; then
+		mkdir -p "$(dirname "$NFT_FILE")"
+		cat > "$NFT_FILE" <<-EOF
+		# 由 /usr/libexec/qp2p-ctl 生成，改了会被覆盖
+		table inet qp2p {
+			chain postrouting {
+				type nat hook postrouting priority 110; policy accept;
+				ip saddr $cidr ip daddr != $cidr masquerade
+			}
+		}
+		EOF
+	else
+		rm -f "$NFT_FILE"
+		nft delete table inet qp2p 2>/dev/null
+	fi
+
+	/etc/init.d/firewall reload >/dev/null 2>&1
+	echo "防火墙已更新（局域网→qp2p=${lan_access}，qp2p→局域网=${peer_to_lan}）"
+}
+
+do_restart() {
+	/etc/init.d/qp2p restart >/dev/null 2>&1
+	echo "服务已重启"
+}
+
+# ---------------------------------------------------------------- 入口
+
+action=${1:-}
+[ $# -gt 0 ] && shift
+
+case "$action" in
+	state)		do_state ;;
+	refresh)	do_refresh ;;
+	apply)		do_apply ;;
+	join)		do_join "${1:-}" ;;
+	create)		do_create "${1:-}" "${2:-}" ;;
+	rotate)		do_rotate "${1:-}" "${2:-}" ;;
+	leave)		do_leave ;;
+	token)		do_token ;;
+	doctor)		do_doctor ;;
+	log)		do_log "${1:-200}" ;;
+	firewall)	do_firewall ;;
+	restart)	do_restart ;;
+	*)
+		cat <<-EOF
+		用法：$0 <动作>
+		  state            当前状态（JSON，不发网络请求）
+		  refresh          向信令服务刷新成员，然后吐 state
+		  apply            把 UCI 设置写进 config.toml
+		  join <令牌>      用令牌入网
+		  create <网络名> <管理密钥>
+		  rotate <管理密钥> [新密钥]
+		  leave            从网络注销本机
+		  token            打印完整加入令牌
+		  doctor           本地诊断
+		  log [行数]       看服务日志
+		  firewall         按当前开关重建防火墙规则
+		  restart          重启服务
+		EOF
+		exit 1
+		;;
+esac

@@ -1,0 +1,17 @@
+{
+	"luci-app-qp2p": {
+		"description": "Grant access to qp2p configuration",
+		"read": {
+			"uci": [ "qp2p" ],
+			"file": {
+				"/usr/libexec/qp2p-ctl": [ "exec" ]
+			}
+		},
+		"write": {
+			"uci": [ "qp2p" ],
+			"file": {
+				"/usr/libexec/qp2p-ctl": [ "exec" ]
+			}
+		}
+	}
+}

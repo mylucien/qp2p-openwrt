@@ -1,0 +1,75 @@
+#!/bin/sh /etc/rc.common
+# qp2p 常驻服务：procd 托管 `qp2p up`。
+#
+# up 是前台进程，退出即服务停止，正好符合 procd 的模型。
+# 所有参数都已经由 qp2p-ctl apply 写进 /etc/qp2p/config.toml，
+# 这里不再拼命令行参数，避免 UCI 和 TOML 两份配置打架。
+
+START=95
+STOP=10
+USE_PROCD=1
+
+CTL=/usr/libexec/qp2p-ctl
+DATA_DIR=/etc/qp2p
+PIDFILE=/var/run/qp2p.pid
+
+start_service() {
+	local enabled dev
+
+	config_load qp2p
+	config_get_bool enabled main enabled 0
+	if [ "$enabled" != 1 ]; then
+		logger -t qp2p "未启用，跳过启动"
+		return 0
+	fi
+
+	if [ ! -x /usr/bin/qp2p ]; then
+		logger -t qp2p "缺少 /usr/bin/qp2p"
+		return 1
+	fi
+
+	if [ ! -s "$DATA_DIR/config.toml" ]; then
+		logger -t qp2p "还没有入网（缺少 $DATA_DIR/config.toml），先到 LuCI 里加入网络"
+		return 1
+	fi
+
+	config_get dev main dev 'qp2p0'
+
+	# UCI 是唯一来源：每次启动都把设置同步进 config.toml，避免两份配置打架
+	$CTL apply >/dev/null 2>&1
+
+	procd_open_instance qp2p
+	procd_set_param command /usr/bin/qp2p up --data-dir "$DATA_DIR"
+	procd_set_param pidfile "$PIDFILE"
+	# 崩溃自动拉起：1 小时内最多 5 次，超过就停下等人工处理
+	procd_set_param respawn 3600 5 0
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_set_param term_timeout 5
+	procd_close_instance
+
+	# 虚拟网卡是 qp2p 自己建的，等它出现再下发防火墙：
+	# 设备还没建就把 zone 指过去，fw4 会报 device 不存在。
+	(
+		for _ in $(seq 1 20); do
+			if [ -d "/sys/class/net/$dev" ]; then
+				$CTL firewall >/dev/null 2>&1
+				break
+			fi
+			sleep 1
+		done
+	) &
+}
+
+stop_service() {
+	logger -t qp2p "服务停止"
+}
+
+reload_service() {
+	stop
+	start
+}
+
+service_triggers() {
+	procd_add_reload_trigger qp2p
+}
