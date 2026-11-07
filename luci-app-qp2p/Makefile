@@ -2,8 +2,10 @@
 
 include $(TOPDIR)/rules.mk
 
-LUCI_TITLE:=LuCI 支持 for qp2p
-LUCI_DESCRIPTION:=qp2p 私有组网的路由器侧界面（概览 / 设置 / 成员 / 日志）
+# menuconfig 走 ncurses，构建机 LANG 不是 UTF-8 时中文会显示成乱码，
+# 所以这两个字段只用 ASCII；网页里的标题和说明仍然是中文（浏览器按 UTF-8 渲染）。
+LUCI_TITLE:=LuCI support for qp2p
+LUCI_DESCRIPTION:=Web UI for the qp2p mesh VPN: overview, settings, peers and log
 LUCI_DEPENDS:=+luci-base +qp2p
 LUCI_PKGARCH:=all
 

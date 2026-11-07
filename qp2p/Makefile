@@ -59,18 +59,21 @@ PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
 include $(INCLUDE_DIR)/package.mk
 
+# menuconfig 走 ncurses，构建机 LANG 不是 UTF-8 时中文会显示成乱码，
+# 所以 TITLE / description 只放 ASCII；面向用户的中文都在 LuCI 页面里。
 define Package/qp2p
   SECTION:=net
   CATEGORY:=Network
   SUBMENU:=VPN
-  TITLE:=qp2p 私有组网（预编译静态二进制）
+  TITLE:=qp2p mesh VPN client (prebuilt static binary)
   URL:=https://github.com/$(QP2P_REPO)
   DEPENDS:=+kmod-tun +ip-full
 endef
 
 define Package/qp2p/description
- qp2p 通过信令服务器撮合，让两台没有公网 IP 的机器打洞直连，
- 业务流量不经过服务器。本包直接使用上游 Releases 发布的静态二进制。
+ qp2p lets machines without a public IP open a direct, end-to-end encrypted
+ link through a lightweight rendezvous worker; payload traffic never passes
+ through the server. Requires root for the TUN device.
 endef
 
 define Build/Prepare
