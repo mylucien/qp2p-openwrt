@@ -1,0 +1,73 @@
+#!/bin/sh
+#
+# qp2p 二进制的完整性校验，由 qp2p/Makefile 的 Build/Prepare 调用。
+#
+# 用法: verify-sums <SHA256SUMS.txt> <文件> <资产名>
+#
+# 退出码:
+#   0  校验通过；或 SUMS 不像校验文件时跳过（沿用原有降级策略）
+#   1  哈希和上游不一致
+#   2  SUMS 里没有这个资产（通常是版本取错了）
+#
+# 为什么不把这段写进 Makefile 的 define Build/Prepare：
+# include/package.mk 的 Build/CoreTargets 会被 $(eval $(call ...)) 再解析一遍，
+# define 里的 $$ 到 shell 时已经被吃掉一层，实测：
+#   echo "$$want"      →  shell 收到 "ant"（$w 展开成空，剩下 ant）
+#   want=$$(awk ...)   →  shell 收到 want=（命令替换被当成 make 变量，展开为空）
+# 于是永远走「不一致」分支。脚本文件不经过 make 展开，没有这个问题，
+# 也能在本机直接跑（不需要 OpenWrt 构建树）。
+
+set -u
+
+SELF=verify-sums
+
+sums=${1:-}
+file=${2:-}
+asset=${3:-}
+
+if [ -z "$sums" ] || [ -z "$file" ] || [ -z "$asset" ]; then
+	echo "usage: $SELF <SHA256SUMS.txt> <file> <asset-name>" >&2
+	exit 64
+fi
+
+if [ ! -f "$sums" ]; then
+	echo "$SELF: 找不到 $sums" >&2
+	exit 66
+fi
+
+if [ ! -f "$file" ]; then
+	echo "$SELF: 找不到 $file" >&2
+	exit 66
+fi
+
+# 只认「第 1 列 64 位十六进制 + 第 2 列恰好等于资产名」的行。
+# 不用 grep 出一行再喂 sha256sum -c：SUMS 万一是 HTML 或压缩内容，
+# grep 只返回 "Binary file ... matches"，会被当成哈希行。
+want=$(awk -v f="$asset" \
+	'length($1) == 64 && $1 ~ /^[0-9a-f]+$/ && $2 == f { print $1; exit }' "$sums")
+nvalid=$(awk 'length($1) == 64 && $1 ~ /^[0-9a-f]+$/ { n++ } END { print n+0 }' "$sums")
+nvalid=${nvalid:-0}
+
+if [ -n "$want" ]; then
+	got=$(sha256sum "$file" | cut -d' ' -f1)
+	if [ "$want" = "$got" ]; then
+		echo "qp2p: sha256 校验通过（$got）"
+		exit 0
+	fi
+	echo "ERROR: $asset 内容和上游不一致"
+	echo "  SHA256SUMS.txt 说: $want"
+	echo "  实际文件        : $got"
+	echo "  （dl/ 里有同名旧缓存？删掉再编：make package/qp2p/clean）"
+	exit 1
+fi
+
+if [ "$nvalid" -gt 0 ]; then
+	echo "ERROR: SHA256SUMS.txt 里没有 $asset（版本取错了？文件内容如下）"
+	cat "$sums"
+	exit 2
+fi
+
+echo "WARNING: SHA256SUMS.txt 不像校验文件（一行 sha256 都没有），本次跳过校验"
+echo "         前 64 字节（十六进制）："
+head -c 64 "$sums" | od -An -tx1
+exit 0

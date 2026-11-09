@@ -76,10 +76,10 @@ define Package/qp2p/description
  through the server. Requires root for the TUN device.
 endef
 
-# 校验不再用「grep 出一行再喂给 sha256sum -c」：SUMS 只要不是纯文本（HTML、
-# 压缩、截断），grep 会返回 "Binary file ... matches"，sha256sum 就报那句没头没尾的
-# "no properly formatted checksum lines found"。这里先精确解析，再把三种失败分开报：
-# 文件不是校验文件 / 没有这个资产 / 哈希对不上。
+# 完整性校验放在 files/verify-sums 里，不写在这个 define 里。
+# 原因：include/package.mk 的 Build/CoreTargets 会被 $(eval $(call ...)) 再解析
+# 一遍，这里的 $$ 到 shell 时只剩一层，又被 make 当变量吃掉一层 —— 实测
+# `echo "$$want"` 到 shell 变成 `echo "ant"`。脚本文件不经过 make 展开。
 define Build/Prepare
 	@[ -n "$(QP2P_TAG_FULL)" ] || { \
 		echo "ERROR: 取不到 $(QP2P_REPO) 的最新 release（GitHub API 不通或限流）。"; \
@@ -93,33 +93,10 @@ define Build/Prepare
 	chmod 0755 $(PKG_BUILD_DIR)/qp2p
 	@echo "qp2p: release v$(QP2P_TAG_FULL) → $(PKG_SOURCE)"
 	@rm -f $(PKG_BUILD_DIR)/SHA256SUMS.txt
-	@if curl -fsSL --compressed --retry 3 --retry-delay 2 --max-time 30 \
-			-o $(PKG_BUILD_DIR)/SHA256SUMS.txt "$(PKG_SOURCE_URL)SHA256SUMS.txt"; then \
-		sums=$(PKG_BUILD_DIR)/SHA256SUMS.txt; \
-		want=$$(awk -v f="$(PKG_SOURCE)" \
-			'length($$1) == 64 && $$1 ~ /^[0-9a-f]+$$/ && $$2 == f { print $$1; exit }' "$$sums"); \
-		nvalid=$$(awk 'length($$1) == 64 && $$1 ~ /^[0-9a-f]+$$/ { n++ } END { print n+0 }' "$$sums"); \
-		if [ -n "$$want" ]; then \
-			got=$$(sha256sum $(PKG_BUILD_DIR)/qp2p | cut -d' ' -f1); \
-			if [ "$$want" = "$$got" ]; then \
-				echo "qp2p: sha256 校验通过（$$got）"; \
-			else \
-				echo "ERROR: $(PKG_SOURCE) 内容和上游不一致"; \
-				echo "  SHA256SUMS.txt 说: $$want"; \
-				echo "  实际文件        : $$got"; \
-				echo "  （dl/ 里有同名旧缓存？删掉 $(DL_DIR)/$(PKG_SOURCE) 再编）"; \
-				exit 1; \
-			fi; \
-		elif [ "$$nvalid" -gt 0 ]; then \
-			echo "ERROR: v$(QP2P_TAG_FULL) 的 SHA256SUMS.txt 里没有 $(PKG_SOURCE)"; \
-			echo "       （版本取错了？文件内容如下）"; \
-			cat "$$sums"; \
-			exit 1; \
-		else \
-			echo "WARNING: SHA256SUMS.txt 不像校验文件（一行 sha256 都没有），本次跳过校验"; \
-			echo "         前 64 字节（十六进制）："; \
-			head -c 64 "$$sums" | od -An -tx1; \
-		fi; \
+	@if curl -fsSL --compressed --retry 3 --retry-delay 2 --max-time 30 -o \
+			$(PKG_BUILD_DIR)/SHA256SUMS.txt "$(PKG_SOURCE_URL)SHA256SUMS.txt"; then \
+		sh $(CURDIR)/files/verify-sums $(PKG_BUILD_DIR)/SHA256SUMS.txt \
+			$(PKG_BUILD_DIR)/qp2p "$(PKG_SOURCE)" || exit 1; \
 	else \
 		echo "WARNING: 取不到 SHA256SUMS.txt（网络错误或 404），本次跳过校验"; \
 	fi
