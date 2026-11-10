@@ -1,6 +1,7 @@
 'use strict';
 'require fs';
 'require ui';
+'require baseclass';
 
 /*
  * 所有和 qp2p 打交道的动作都从这个模块走。
@@ -107,7 +108,13 @@ function prompt(title, message, placeholder, type) {
 	});
 }
 
-return {
+/*
+ * LuCI 的模块工厂必须交出一个类：loader 会做 Class.isSubclass() 检查，然后
+ * `new _class()` 拿到单例再交给 require 的调用方。直接 return 一个对象会报
+ * "factory yields invalid constructor"。所以这里 extend 一层，方法仍是实例方法，
+ * 调用方写 ctl.exec(...) 不受影响。
+ */
+return baseclass.extend({
 	exec: run,
 	json: runJson,
 	show: show,
@@ -129,4 +136,4 @@ return {
 			return res.stdout || '';
 		});
 	}
-};
+});

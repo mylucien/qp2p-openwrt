@@ -193,26 +193,20 @@ return view.extend({
 		return m.render();
 	},
 
-	/* 把表单里的值落到 /etc/config/qp2p（提交 UCI），不发通知 */
-	saveForm: function (ev) {
+	/*
+	 * 保存并应用：走基类 handleSave（它去扫 .cbi-map 调 Map.save），
+	 * 再 apply + 重启服务（服务启动时才会把 UCI 写进 /etc/qp2p/config.toml）。
+	 *
+	 * 注意 handleSave 不能在本类里覆盖：this.super('handleSave') 是从子类原型
+	 * 往上找的，子类一旦自己定义了 handleSave 就会命中自己，直接无限递归。
+	 */
+	handleSaveApply: function (ev, mode) {
 		return this.super('handleSave', [ ev ]).then(function () {
 			return uci.apply();
-		});
-	},
-
-	/* 保存并应用：提交 UCI → 重启服务（服务启动时会把设置写进 config.toml） */
-	handleSaveApply: function (ev, mode) {
-		return this.saveForm(ev).then(function () {
+		}).then(function () {
 			return ctl.exec('restart');
 		}).then(function (res) {
 			ctl.show('已保存并应用', res);
-		});
-	},
-
-	/* 只保存：提交 UCI，但不重启服务 */
-	handleSave: function (ev) {
-		return this.saveForm(ev).then(function () {
-			ui.addNotification(null, E('p', {}, '已保存。服务下次启动时生效。'), 'info');
 		});
 	},
 
@@ -285,6 +279,6 @@ return view.extend({
 
 	/* 给 join / create 用：先把当前表单落盘，后面的 CLI 才读得到 */
 	commit: function () {
-		return this.saveForm().catch(function () { /* 校验没过就不继续 */ });
+		return this.super('handleSave', [ null ]).catch(function () { /* 校验没过就不继续 */ });
 	}
 });
