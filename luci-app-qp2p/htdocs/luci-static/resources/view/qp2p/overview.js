@@ -20,7 +20,7 @@ function mono(text) {
 
 function kv(k, v) {
 	return [
-		E('td', { 'class': 'th', 'style': 'width:32%' }, k),
+		E('td', { 'class': 'th', 'style': 'width:1%;white-space:nowrap;padding-right:2em' }, k),
 		E('td', { 'style': 'font-family:monospace;word-break:break-all' }, v)
 	];
 }
@@ -75,7 +75,7 @@ return view.extend({
 
 		var view = E('div', {}, [
 			/* 状态条 */
-			E('div', { 'class': 'cbi-section', 'style': 'padding:.4em 0' }, [
+			E('div', { 'class': 'cbi-section', 'style': 'padding:.9em var(--section-inset, 1.25rem)' }, [
 				E('div', { 'style': 'display:flex;align-items:center;gap:1em;flex-wrap:wrap' }, [
 					E('span', { 'style': 'display:flex;align-items:center' }, [ led, this.nodes.status ]),
 					this.nodes.net,
@@ -93,7 +93,11 @@ return view.extend({
 
 			/* 四个数字 */
 			E('div', { 'class': 'cbi-section' }, [
-				E('table', { 'class': 'table' }, [
+				E('table', {
+					'class': 'table',
+					'style': 'margin:0 var(--section-inset, 1.25rem) var(--section-inset, 1.25rem);' +
+						'width:calc(100% - 2 * var(--section-inset, 1.25rem))'
+				}, [
 					E('tr', {}, [
 						stat('本机虚拟地址', this.nodes.ip, s.cidr ? ('网段 ' + s.cidr) : ''),
 						stat('直连', this.nodes.links, ''),
@@ -108,7 +112,7 @@ return view.extend({
 			/* 令牌 */
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, '加入令牌'),
-				E('div', { 'class': 'cbi-value' }, [
+				E('div', { 'class': 'cbi-value', 'style': 'padding-bottom:var(--section-inset, 1.25rem)' }, [
 					E('div', { 'class': 'cbi-value-field' }, [
 						E('div', { 'style': 'display:flex;gap:.5em;flex-wrap:wrap' }, [
 							E('div', { 'style': 'flex:1;min-width:16em' }, tokenBox),
@@ -131,7 +135,11 @@ return view.extend({
 			/* 本机信息 */
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, '本机信息'),
-				E('table', { 'class': 'table' }, [
+				E('table', {
+					'class': 'table',
+					'style': 'margin:0 var(--section-inset, 1.25rem) var(--section-inset, 1.25rem);' +
+						'width:calc(100% - 2 * var(--section-inset, 1.25rem))'
+				}, [
 					E('tr', { 'class': 'tr' }, kv('信令服务器', s.worker || '未设置')),
 					E('tr', { 'class': 'tr' }, kv('网络', s.net ? (s.net + '  ' + (s.cidr || '')) : '未加入')),
 					E('tr', { 'class': 'tr' }, kv('UDP 监听', (s.bind || '0.0.0.0') + ':' + (s.port || 51820))),

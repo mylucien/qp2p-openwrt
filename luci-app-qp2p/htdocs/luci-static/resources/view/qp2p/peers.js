@@ -22,7 +22,11 @@ return view.extend({
 
 		this.summary = E('span', { 'style': 'opacity:.7' }, '');
 
-		var table = E('table', { 'class': 'table' }, [
+		var table = E('table', {
+			'class': 'table',
+			'style': 'margin:0 var(--section-inset, 1.25rem);' +
+				'width:calc(100% - 2 * var(--section-inset, 1.25rem))'
+		}, [
 			E('thead', {}, [
 				E('tr', { 'class': 'tr table-titles' }, [
 					E('th', { 'class': 'th' }, '名称'),
@@ -41,7 +45,8 @@ return view.extend({
 		var view = E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, '在线成员'),
 			E('div', {
-				'style': 'display:flex;align-items:center;gap:1em;flex-wrap:wrap;margin-bottom:.8em'
+				'style': 'display:flex;align-items:center;gap:1em;flex-wrap:wrap;' +
+					'margin:0 var(--section-inset, 1.25rem) .8em'
 			}, [
 				this.summary,
 				E('div', { 'style': 'flex:1' }),
@@ -51,7 +56,10 @@ return view.extend({
 				}, '刷新')
 			]),
 			table,
-			E('p', { 'class': 'cbi-value-description', 'style': 'margin-top:1em' },
+			E('p', {
+				'class': 'cbi-value-description',
+				'style': 'margin:1em var(--section-inset, 1.25rem) var(--section-inset, 1.25rem)'
+			},
 				'「延迟」来自日志里的直连记录 —— 命令行没有输出结构化状态，' +
 				'所以只有真的直连成功过、并且日志还没被刷掉的节点才会显示数字。')
 		]);

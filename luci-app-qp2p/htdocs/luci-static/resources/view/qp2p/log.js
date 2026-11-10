@@ -14,7 +14,8 @@ return view.extend({
 
 		this.pre = E('pre', {
 			'style': 'max-height:34em;overflow:auto;white-space:pre-wrap;word-break:break-all;' +
-				'font-family:monospace;font-size:90%;line-height:1.5;margin:0;' +
+				'font-family:monospace;font-size:90%;line-height:1.5;' +
+				'margin:0 var(--section-inset, 1.25rem);' +
 				'background:rgba(0,0,0,.04);padding:.8em;border-radius:4px'
 		}, text || '（暂无日志）');
 
@@ -23,7 +24,8 @@ return view.extend({
 		var view = E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, '服务日志'),
 			E('div', {
-				'style': 'display:flex;align-items:center;gap:1em;flex-wrap:wrap;margin-bottom:.8em'
+				'style': 'display:flex;align-items:center;gap:1em;flex-wrap:wrap;' +
+					'margin:0 var(--section-inset, 1.25rem) .8em'
 			}, [
 				E('label', { 'style': 'display:flex;align-items:center;gap:.4em' },
 					[ this.autoscroll, '自动滚动' ]),
@@ -38,7 +40,10 @@ return view.extend({
 				}, '本地诊断')
 			]),
 			this.pre,
-			E('p', { 'class': 'cbi-value-description', 'style': 'margin-top:1em' },
+			E('p', {
+				'class': 'cbi-value-description',
+				'style': 'margin:1em var(--section-inset, 1.25rem) var(--section-inset, 1.25rem)'
+			},
 				'内容来自系统日志（logread，按 qp2p 过滤，最多 300 行）。' +
 				'打洞、认证、虚拟网卡和成员变化都会打在这里。')
 		]);
