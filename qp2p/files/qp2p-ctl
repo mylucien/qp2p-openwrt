@@ -31,6 +31,16 @@ uci_get_bool() {
 	esac
 }
 
+# 信令地址允许只填域名或 host:port，统一补成 https://。
+# 人人都会直接输 p2p.example.com，没必要为此让表单报错。
+norm_worker() {
+	case "${1:-}" in
+		'')			echo '' ;;
+		http://*|https://*)	echo "$1" ;;
+		*)			echo "https://$1" ;;
+	esac
+}
+
 # JSON 字符串转义（含换行）。值都来自我们自己，只处理会让 JSON 解析失败的字符。
 jstr() {
 	printf '"%s"' "$(printf '%s' "${1:-}" | awk '
@@ -209,7 +219,7 @@ do_apply() {
 	[ -x "$PROG" ] || { echo "缺少 $PROG"; return 1; }
 	mkdir -p "$DATA_DIR"
 
-	v=$(uci_get worker)
+	v=$(norm_worker "$(uci_get worker)")
 	if [ -n "$v" ]; then
 		$PROG config set worker "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1 \
 			|| { echo "信令地址不合法：$v（要以 http:// 或 https:// 开头）"; return 1; }
@@ -263,7 +273,7 @@ do_join() {
 	token=${1:-}
 	[ -n "$token" ] || { echo "缺少加入令牌"; return 1; }
 
-	worker=$(uci_get worker)
+	worker=$(norm_worker "$(uci_get worker)")
 	[ -n "$worker" ] || { echo "先填信令服务器地址再入网"; return 1; }
 
 	# 先把名字/地址写进 config.toml，join 登记时用的就是这些值
@@ -285,7 +295,7 @@ do_create() {
 	name=${1:-}
 	secret=${2:-${QP2P_ADMIN_SECRET:-}}
 	[ -n "$name" ] || { echo "缺少网络名（只能用小写字母、数字和连字符）"; return 1; }
-	worker=$(uci_get worker)
+	worker=$(norm_worker "$(uci_get worker)")
 	[ -n "$worker" ] || { echo "先填信令服务器地址"; return 1; }
 	[ -n "$secret" ] || { echo "建网需要管理密钥（ADMIN_SECRET）"; return 1; }
 
@@ -306,7 +316,7 @@ do_rotate() {
 
 	secret=${1:-${QP2P_ADMIN_SECRET:-}}
 	key=${2:-}
-	worker=$(uci_get worker)
+	worker=$(norm_worker "$(uci_get worker)")
 	[ -n "$secret" ] || { echo "换令牌需要管理密钥（ADMIN_SECRET）"; return 1; }
 
 	if [ -n "$key" ]; then

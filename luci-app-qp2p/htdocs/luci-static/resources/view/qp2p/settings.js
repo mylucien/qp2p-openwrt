@@ -66,7 +66,9 @@ return view.extend({
 		o.validate = function (section_id, value) {
 			if (!value)
 				return true;
-			return /^https?:\/\/[^\s]+$/.test(value) ? true : '要以 http:// 或 https:// 开头';
+			/* 允许只填域名/IP，保存后由 qp2p-ctl 补 https:// */
+			return /^(https?:\/\/)?[A-Za-z0-9._\-]+(:\d{1,5})?(\/[^\s]*)?$/.test(value)
+				? true : '填域名或 IP，例如 p2p.example.com';
 		};
 
 		o = s.option(form.Value, 'name', '本机名称',
@@ -277,8 +279,24 @@ return view.extend({
 		});
 	},
 
-	/* 给 join / create 用：先把当前表单落盘，后面的 CLI 才读得到 */
+	/* 给 join / create 用：先把当前表单落盘，后面的 CLI 才读得到。
+	 * 保存失败必须停下并说明原因 —— 以前这里静默 catch，表单里 worker 校验没过
+	 * 也照常弹令牌框，最后 CLI 只会说「先填信令服务器地址」，完全看不出真相。 */
 	commit: function () {
-		return this.super('handleSave', [ null ]).catch(function () { /* 校验没过就不继续 */ });
+		return this.super('handleSave', [ null ]).catch(function (err) {
+			var msg = '';
+
+			if (Array.isArray(err))
+				msg = err[err.length - 1] || '';
+			else if (err && err.message)
+				msg = err.message;
+			else if (err)
+				msg = String(err);
+
+			ui.addNotification(null, E('p', {},
+				'设置没有保存成功' + (msg ? '：' + msg : '，先检查表单里标红的项')), 'error');
+
+			throw err;
+		});
 	}
 });
