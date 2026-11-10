@@ -268,18 +268,22 @@ do_apply() {
 # ---------------------------------------------------------------- 入网 / 建网 / 换令牌
 
 do_join() {
-	local token worker out
+	local token worker name ip out
 
 	token=${1:-}
 	[ -n "$token" ] || { echo "缺少加入令牌"; return 1; }
 
-	# 第二参数只在「弹窗里一起填地址」的旧路径用到；新界面地址直接写在表单里，
-	# 由前端先 save 再调这里。
+	# 表单里的值由前端一并传进来，这里统一写 UCI 并 commit。
+	# 不依赖前端「保存表单」——LuCI 的 Map.save 在这套主题下会静默失败，
+	# 结果就是 worker 一直为空，join 只能报「先填信令服务器地址」。
 	worker=${2:-}
-	if [ -n "$worker" ]; then
-		uci set "qp2p.main.worker=$worker" 2>/dev/null
-		uci commit qp2p 2>/dev/null
-	fi
+	name=${3:-}
+	ip=${4:-}
+
+	[ -n "$worker" ] && uci set "qp2p.main.worker=$worker" 2>/dev/null
+	[ -n "$name" ] && uci set "qp2p.main.name=$name" 2>/dev/null
+	[ -n "$ip" ] && uci set "qp2p.main.ip=$ip" 2>/dev/null
+	[ -n "$worker$name$ip" ] && uci commit qp2p 2>/dev/null
 
 	worker=$(norm_worker "$(uci_get worker)")
 	[ -n "$worker" ] || { echo "先填信令服务器地址再入网"; return 1; }
@@ -436,7 +440,7 @@ case "$action" in
 	state)		do_state ;;
 	refresh)	do_refresh ;;
 	apply)		do_apply ;;
-	join)		do_join "${1:-}" "${2:-}" ;;
+	join)		do_join "${1:-}" "${2:-}" "${3:-}" "${4:-}" ;;
 	create)		do_create "${1:-}" "${2:-}" ;;
 	rotate)		do_rotate "${1:-}" "${2:-}" ;;
 	leave)		do_leave ;;

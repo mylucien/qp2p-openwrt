@@ -43,6 +43,7 @@ return view.extend({
 		var m, s, o;
 
 		state = state || {};
+		this.fields = {};
 
 		m = new form.Map('qp2p', 'qp2p 组网',
 			'设置保存在 /etc/config/qp2p。点「保存并应用」会提交配置并重启服务；' +
@@ -70,6 +71,7 @@ return view.extend({
 			return /^(https?:\/\/)?[A-Za-z0-9._\-]+(:\d{1,5})?(\/[^\s]*)?$/.test(value)
 				? true : '填域名或 IP，例如 p2p.example.com';
 		};
+		this.fields.worker = o;
 
 		o = s.option(form.Value, 'name', '本机名称',
 			'成员列表里显示的名字。留空用主机名。');
@@ -77,6 +79,7 @@ return view.extend({
 		o.validate = function (section_id, value) {
 			return (!value || value.length <= 32) ? true : '最多 32 个字符';
 		};
+		this.fields.name = o;
 
 		o = s.option(form.Value, 'ip', '固定虚拟地址',
 			'填了会被服务端预留，重启不变；留空由服务端分配。' +
@@ -87,6 +90,7 @@ return view.extend({
 				return true;
 			return isIpv4(value) ? true : '不是合法 IPv4';
 		};
+		this.fields.ip = o;
 
 		/*
 		 * 令牌只在这次入网时用，不进 UCI：覆盖 write 让它永远不落 /etc/config。
@@ -98,7 +102,7 @@ return view.extend({
 		o.placeholder = 'qp2p1_home_xxxxxxxx';
 		o.rmempty = true;
 		o.write = function () {};
-		this.tokenOpt = o;
+		this.fields.token = o;
 
 		/* ---------------- 入网动作 ---------------- */
 		o = s.option(form.Button, '_join', '入网',
@@ -248,21 +252,33 @@ return view.extend({
 	},
 
 	/*
-	 * 入网：表单里的信令地址 / 本机名称 / 固定地址一起保存，令牌从输入框直接读。
-	 * 令牌不进 UCI，也不经过弹窗 —— 填完点一次就完事。
+	 * 入网：从表单直接读四个值，全部交给 qp2p-ctl 写 UCI 并登记。
+	 * 不经过 Map.save —— 它在 Argon 主题下会静默失败（DOM.callClassMethod
+	 * 找不到实例时返回 null，Promise.all([null]) 照样 resolve），
+	 * 结果就是 UCI 里的 worker 一直是空，join 只能报「先填信令服务器地址」。
 	 */
 	handleJoin: function () {
-		var token = String((this.tokenOpt && this.tokenOpt.formvalue('main')) || '')
-			.replace(/^\s+|\s+$/g, '');
+		var f = this.fields || {};
+
+		function val(k) {
+			var o = f[k];
+			return o ? String(o.formvalue('main') || '').replace(/^\s+|\s+$/g, '') : '';
+		}
+
+		var token = val('token');
+		var worker = val('worker');
 
 		if (!token) {
 			ui.addNotification(null, E('p', {}, '先在上面「加入令牌」里填令牌'), 'error');
 			return;
 		}
 
-		return this.saveForm().then(function () {
-			return ctl.exec('join', [ token ]);
-		}).then(function (res) {
+		if (!worker) {
+			ui.addNotification(null, E('p', {}, '先填信令服务器地址'), 'error');
+			return;
+		}
+
+		return ctl.exec('join', [ token, worker, val('name'), val('ip') ]).then(function (res) {
 			ctl.show('加入网络', res);
 			if (res.code == 0)
 				return ctl.exec('restart').then(function () { location.reload(); });
