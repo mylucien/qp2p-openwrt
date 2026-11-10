@@ -32,6 +32,34 @@ function checkList(value, test, hint) {
 	return bad.length ? hint + '：' + bad.join('、') : true;
 }
 
+/*
+ * 操作结果用模态框显示，用户点一下再继续。
+ * 通知（addNotification）几秒就消失，而 join 成功后会立刻重启+刷新，
+ * 根本来不及看。
+ */
+function showResult(title, res, doneLabel) {
+	var text = [ res.stdout, res.stderr ].filter(function (s) { return s !== ''; }).join('\n\n');
+	var ok = res.code == 0;
+
+	if (!text)
+		text = ok ? '完成' : '失败（没有输出）';
+
+	return new Promise(function (resolve) {
+		ui.showModal(title, [
+			E('pre', {
+				'style': 'white-space:pre-wrap;word-break:break-all;margin:0;' +
+					'font-family:monospace;font-size:90%;line-height:1.5;max-height:22em;overflow:auto'
+			}, text),
+			E('div', { 'class': 'right', 'style': 'margin-top:1em' }, [
+				E('button', {
+					'class': 'btn cbi-button cbi-button-apply',
+					'click': function () { ui.hideModal(); resolve(); }
+				}, doneLabel || (ok ? '好' : '知道了'))
+			])
+		]);
+	});
+}
+
 return view.extend({
 	load: function () {
 		return Promise.all([ uci.load('qp2p'), ctl.state() ]).then(function (res) {
@@ -226,8 +254,10 @@ return view.extend({
 		if (ev && typeof ev.preventDefault === 'function')
 			ev.preventDefault();
 
-		if (!this.map || typeof this.map.save !== 'function')
-			return Promise.reject(new Error('表单还没就绪，刷新页面再试'));
+		if (!this.map || typeof this.map.save !== 'function') {
+			ui.addNotification(null, E('p', {}, '表单还没就绪，刷新页面再试'), 'error');
+			return Promise.reject(new Error('map not ready'));
+		}
 
 		return this.map.save();
 	},
@@ -247,7 +277,7 @@ return view.extend({
 		}).then(function () {
 			return ctl.exec('restart');
 		}).then(function (res) {
-			ctl.show('已保存并应用', res);
+			return showResult('已保存并应用', res);
 		});
 	},
 
@@ -279,9 +309,10 @@ return view.extend({
 		}
 
 		return ctl.exec('join', [ token, worker, val('name'), val('ip') ]).then(function (res) {
-			ctl.show('加入网络', res);
-			if (res.code == 0)
-				return ctl.exec('restart').then(function () { location.reload(); });
+			return showResult(res.code == 0 ? '加入成功' : '加入失败', res).then(function () {
+				if (res.code == 0)
+					return ctl.exec('restart').then(function () { location.reload(); });
+			});
 		});
 	},
 
