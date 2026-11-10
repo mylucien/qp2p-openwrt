@@ -273,6 +273,15 @@ do_join() {
 	token=${1:-}
 	[ -n "$token" ] || { echo "缺少加入令牌"; return 1; }
 
+	# 第二个参数是弹窗里一起填的信令地址：先落 UCI，后面的 apply / 重启都以它为准。
+	# 这样前端不用先「保存表单」再入网，少一步也就少一个失败点。
+	worker=${2:-}
+	if [ -n "$worker" ]; then
+		uci set "qp2p.main.worker=$worker" 2>/dev/null
+		uci set qp2p.main.enabled=1 2>/dev/null
+		uci commit qp2p 2>/dev/null
+	fi
+
 	worker=$(norm_worker "$(uci_get worker)")
 	[ -n "$worker" ] || { echo "先填信令服务器地址再入网"; return 1; }
 
@@ -424,7 +433,7 @@ case "$action" in
 	state)		do_state ;;
 	refresh)	do_refresh ;;
 	apply)		do_apply ;;
-	join)		do_join "${1:-}" ;;
+	join)		do_join "${1:-}" "${2:-}" ;;
 	create)		do_create "${1:-}" "${2:-}" ;;
 	rotate)		do_rotate "${1:-}" "${2:-}" ;;
 	leave)		do_leave ;;

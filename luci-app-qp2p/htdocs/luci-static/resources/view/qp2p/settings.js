@@ -32,6 +32,72 @@ function checkList(value, test, hint) {
 	return bad.length ? hint + '：' + bad.join('、') : true;
 }
 
+/*
+ * 入网要两样东西：信令地址 + 令牌。一次问完再落盘，不要先让用户点保存。
+ * 返回 Promise<{worker, token}>，取消时 resolve(null)。
+ */
+function askJoin(defaultWorker) {
+	return new Promise(function (resolve) {
+		var err = E('p', { 'style': 'color:#c62828;margin:.6em 0 0;display:none' }, '');
+
+		var worker = E('input', {
+			'class': 'cbi-input-text',
+			'type': 'text',
+			'placeholder': 'p2p.example.com',
+			'value': defaultWorker || '',
+			'style': 'width:100%'
+		});
+
+		var token = E('input', {
+			'class': 'cbi-input-text',
+			'type': 'text',
+			'placeholder': 'qp2p1_home_xxxxxxxx',
+			'style': 'width:100%;margin-top:.5em'
+		});
+
+		function fail(msg) {
+			err.textContent = msg;
+			err.style.display = 'block';
+		}
+
+		ui.showModal('加入网络', [
+			E('p', {}, '信令服务器只负责撮合，业务流量不经过它。两样都填好，点「加入」一次完成。'),
+			E('div', { 'style': 'margin-top:.8em;font-size:90%;opacity:.7' }, '信令服务器'),
+			worker,
+			E('div', { 'style': 'margin-top:.8em;font-size:90%;opacity:.7' }, '加入令牌'),
+			token,
+			err,
+			E('p', { 'class': 'cbi-value-description', 'style': 'margin-top:.8em' },
+				'令牌以 <code>qp2p1_</code> 开头，粘贴带令牌的链接也能识别。'),
+			E('div', { 'class': 'right', 'style': 'margin-top:1em' }, [
+				E('button', {
+					'class': 'btn',
+					'click': function () { ui.hideModal(); resolve(null); }
+				}, '取消'),
+				E('button', {
+					'class': 'btn cbi-button cbi-button-apply',
+					'click': function () {
+						var w = worker.value.replace(/^\s+|\s+$/g, '');
+						var t = token.value.replace(/^\s+|\s+$/g, '');
+
+						if (!w)
+							return fail('信令服务器不能为空');
+						if (!t)
+							return fail('令牌不能为空');
+
+						ui.hideModal();
+						resolve({ worker: w, token: t });
+					}
+				}, '加入')
+			])
+		]);
+
+		window.setTimeout(function () {
+			(defaultWorker ? token : worker).focus();
+		}, 50);
+	});
+}
+
 return view.extend({
 	load: function () {
 		return Promise.all([ uci.load('qp2p'), ctl.state() ]).then(function (res) {
@@ -235,16 +301,19 @@ return view.extend({
 		});
 	},
 
+	/*
+	 * 入网：弹窗里同时填信令地址和令牌，一次交给 qp2p-ctl。
+	 * 地址落 UCI 由 CLI 那边做（uci set + commit），不经过表单保存 ——
+	 * 表单那条路一旦失败就变成「先填信令服务器地址」的鬼打墙。
+	 */
 	handleJoin: function () {
-		return this.commit().then(function () {
-			return ctl.prompt('加入网络',
-				'粘贴管理员给的令牌，以 <code>qp2p1_</code> 开头；粘贴带令牌的链接也能识别。',
-				'qp2p1_home_xxxxxxxx');
-		}).then(function (token) {
-			if (!token)
+		var current = uci.get('qp2p', 'main', 'worker') || '';
+
+		return askJoin(current).then(function (v) {
+			if (!v)
 				return;
 
-			return ctl.exec('join', [ token ]).then(function (res) {
+			return ctl.exec('join', [ v.token, v.worker ]).then(function (res) {
 				ctl.show('加入网络', res);
 				if (res.code == 0)
 					return ctl.exec('restart').then(function () { location.reload(); });
