@@ -192,18 +192,41 @@ return view.extend({
 		o.placeholder = 'lan';
 		o.default = 'lan';
 
+		/* 记住 Map 实例：保存时直接调它的 save()，不走基类那套 DOM 查找 */
+		this.map = m;
+
 		return m.render();
 	},
 
 	/*
-	 * 保存并应用：走基类 handleSave（它去扫 .cbi-map 调 Map.save），
-	 * 再 apply + 重启服务（服务启动时才会把 UCI 写进 /etc/qp2p/config.toml）。
+	 * 保存表单。直接调 form.Map.save()，不用基类的 handleSave：
+	 * 基类实现是扫 #maincontent 下的 .cbi-map 再 DOM.callClassMethod(map, 'save')，
+	 * 而 callClassMethod 找不到实例时只 return null —— Promise.all([null]) 照样
+	 * 成功，保存就这么被静默跳过了，表单里填的东西一个都没进 UCI。
 	 *
-	 * 注意 handleSave 不能在本类里覆盖：this.super('handleSave') 是从子类原型
-	 * 往上找的，子类一旦自己定义了 handleSave 就会命中自己，直接无限递归。
+	 * Map.save() 失败时自己会弹 save error 对话框，比这里再包一层清楚。
 	 */
+	saveForm: function (ev) {
+		if (ev && typeof ev.preventDefault === 'function')
+			ev.preventDefault();
+
+		if (!this.map || typeof this.map.save !== 'function')
+			return Promise.reject(new Error('表单还没就绪，刷新页面再试'));
+
+		return this.map.save();
+	},
+
+	/* 只保存：Map.save() 只写 UCI 文件，不重启服务 */
+	handleSave: function (ev) {
+		return this.saveForm(ev).then(function () {
+			ui.addNotification(null, E('p', {},
+				'已保存。服务要重启后才会读到新设置。'), 'info');
+		});
+	},
+
+	/* 保存并应用：写 UCI → commit → 重启服务（启动时才生成 config.toml） */
 	handleSaveApply: function (ev, mode) {
-		return this.super('handleSave', [ ev ]).then(function () {
+		return this.saveForm(ev).then(function () {
 			return uci.apply();
 		}).then(function () {
 			return ctl.exec('restart');
@@ -280,23 +303,10 @@ return view.extend({
 	},
 
 	/* 给 join / create 用：先把当前表单落盘，后面的 CLI 才读得到。
-	 * 保存失败必须停下并说明原因 —— 以前这里静默 catch，表单里 worker 校验没过
-	 * 也照常弹令牌框，最后 CLI 只会说「先填信令服务器地址」，完全看不出真相。 */
+	 * saveForm 失败时 Map.save() 自己弹过错误框了，这里把 reject 直接传出去，
+	 * 让 handleJoin 的 then 链停下来 —— 以前静默 catch，worker 没保存也照弹
+	 * 令牌框，最后 CLI 只说「先填信令服务器地址」，完全看不出真相。 */
 	commit: function () {
-		return this.super('handleSave', [ null ]).catch(function (err) {
-			var msg = '';
-
-			if (Array.isArray(err))
-				msg = err[err.length - 1] || '';
-			else if (err && err.message)
-				msg = err.message;
-			else if (err)
-				msg = String(err);
-
-			ui.addNotification(null, E('p', {},
-				'设置没有保存成功' + (msg ? '：' + msg : '，先检查表单里标红的项')), 'error');
-
-			throw err;
-		});
+		return this.saveForm(null);
 	}
 });
