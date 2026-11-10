@@ -273,12 +273,11 @@ do_join() {
 	token=${1:-}
 	[ -n "$token" ] || { echo "缺少加入令牌"; return 1; }
 
-	# 第二个参数是弹窗里一起填的信令地址：先落 UCI，后面的 apply / 重启都以它为准。
-	# 这样前端不用先「保存表单」再入网，少一步也就少一个失败点。
+	# 第二参数只在「弹窗里一起填地址」的旧路径用到；新界面地址直接写在表单里，
+	# 由前端先 save 再调这里。
 	worker=${2:-}
 	if [ -n "$worker" ]; then
 		uci set "qp2p.main.worker=$worker" 2>/dev/null
-		uci set qp2p.main.enabled=1 2>/dev/null
 		uci commit qp2p 2>/dev/null
 	fi
 
@@ -293,6 +292,10 @@ do_join() {
 		return 1
 	}
 	printf '%s\n' "$out"
+
+	# 入网成功即视为要开始用：打开总开关，下次重启也会自己拉起
+	uci set qp2p.main.enabled=1 2>/dev/null
+	uci commit qp2p 2>/dev/null
 
 	# 入网后虚拟地址才有意义，再补一次
 	do_apply >/dev/null 2>&1
