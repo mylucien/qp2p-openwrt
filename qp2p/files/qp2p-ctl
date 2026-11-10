@@ -53,6 +53,11 @@ is_running() {
 
 # 从 `qp2p config` 的文本里取几项。全是本地信息，不发网络请求。
 # 结果放在 worker / net / cidr / vip / token_hint 里。
+#
+# 注意未入网时这几行是提示语而不是值，例如
+#   信令服务 : 未设置（qp2p init <地址>）
+#   网络     : 未加入（qp2p create / qp2p join）
+# 不排掉的话会被按空格切成 net=未加入（qp2p、cidr=create / qp2p join）。
 read_config() {
 	local line rest
 
@@ -60,10 +65,17 @@ read_config() {
 
 	while IFS= read -r line; do
 		case "$line" in
-			"信令服务 : "*)	worker=${line#信令服务 : } ;;
-			"网络     : "*)	rest=${line#网络     : } ;;
-			"虚拟地址 : "*)	vip=${line#虚拟地址 : } ;;
-			"加入令牌 : "*)	token_hint=${line#加入令牌 : } ;;
+			"信令服务 : "*)
+				worker=${line#信令服务 : }
+				case "$worker" in 未设置*|未配置*|无) worker='' ;; esac ;;
+			"网络     : "*)
+				rest=${line#网络     : }
+				case "$rest" in 未加入*|未设置*|无) rest='' ;; esac ;;
+			"虚拟地址 : "*)
+				vip=${line#虚拟地址 : }
+				case "$vip" in 由服务端分配*|未*|无) vip='' ;; esac ;;
+			"加入令牌 : "*)
+				token_hint=${line#加入令牌 : } ;;
 		esac
 	done <<-EOF
 	$($PROG config --data-dir "$DATA_DIR" 2>/dev/null)
@@ -74,7 +86,6 @@ read_config() {
 		net=${rest%% *}
 		[ "$net" != "$rest" ] && cidr=${rest#* }
 	fi
-	[ "$vip" = "由服务端分配" ] && vip=''
 }
 
 # 直连信息只能从日志里读：CLI 没有 --json，status 也不吐 rtt。
