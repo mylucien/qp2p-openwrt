@@ -33,7 +33,7 @@
 		"order": 30,
 		"action": {
 			"type": "view",
-			"path": "qp2p/log-v2"
+			"path": "qp2p/log-v3"
 		}
 	}
 }
