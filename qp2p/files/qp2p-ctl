@@ -192,6 +192,12 @@ do_refresh() {
 			l = $0
 			sub(/^[ \t]+/, "", l)
 
+			# 0.1.7 起 status 前面多了几行「网络 : home 10.78.0.0/16」
+			# 「虚拟地址 : 10.78.106.34（网段 ...）」，里面带 IPv4，
+			# 会被下面按 IP 切段的逻辑误当成两名成员。
+			# 成员表的行不含冒号，先把所有 "key : value" 说明行挡掉。
+			if (index(l, ":") > 0) next
+
 			cands = ""
 			if (match(l, /[ \t]+[0-9]+$/)) {
 				cands = substr(l, RSTART, RLENGTH)
