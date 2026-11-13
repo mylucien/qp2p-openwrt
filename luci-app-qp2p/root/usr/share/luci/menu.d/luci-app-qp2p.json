@@ -24,22 +24,13 @@
 		"order": 20,
 		"action": {
 			"type": "view",
-			"path": "qp2p/settings-v3"
-		}
-	},
-
-	"admin/vpn/qp2p/peers": {
-		"title": "成员",
-		"order": 30,
-		"action": {
-			"type": "view",
-			"path": "qp2p/peers"
+			"path": "qp2p/settings-v4"
 		}
 	},
 
 	"admin/vpn/qp2p/log": {
 		"title": "日志",
-		"order": 40,
+		"order": 30,
 		"action": {
 			"type": "view",
 			"path": "qp2p/log"

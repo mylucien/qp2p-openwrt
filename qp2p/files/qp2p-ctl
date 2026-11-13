@@ -133,7 +133,7 @@ peers_json() {
 }
 
 do_state() {
-	local running=0 enabled joined=0 version dev mtu bind port idle routes stun
+	local running=0 enabled joined=0 version dev mtu bind port idle routes stun name transport
 	local lan_access peer_to_lan lan_zone
 
 	is_running && running=1
@@ -152,6 +152,8 @@ do_state() {
 	idle=$(uci_get idle);		idle=${idle:-0}
 	routes=$(uci_get routes)
 	stun=$(uci_get stun)
+	name=$(uci_get name)
+	transport=$(uci_get transport);	transport=${transport:-auto}
 	lan_access=$(uci_get_bool lan_access 1)
 	peer_to_lan=$(uci_get_bool peer_to_lan 0)
 	lan_zone=$(uci_get lan_zone);	lan_zone=${lan_zone:-lan}
@@ -161,7 +163,8 @@ do_state() {
 "worker":$(jstr "$worker"),"net":$(jstr "$net"),"cidr":$(jstr "$cidr"),"ip":$(jstr "$vip"),
 "token_hint":$(jstr "$token_hint"),
 "dev":$(jstr "$dev"),"mtu":$mtu,"bind":$(jstr "$bind"),"port":$port,"idle":$idle,
-"routes":$(jstr "$routes"),"stun":$(jstr "$stun"),
+"routes":$(jstr "$routes"),"stun":$(jstr "$stun"),"name":$(jstr "$name"),
+"transport":$(jstr "$transport"),
 "lan_access":$lan_access,"peer_to_lan":$peer_to_lan,"lan_zone":$(jstr "$lan_zone"),
 "peers":$(peers_json)}
 EOF
@@ -242,6 +245,16 @@ do_apply() {
 	v=$(uci_get dev);	[ -n "$v" ] && $PROG config set dev "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1
 	v=$(uci_get idle);	[ -n "$v" ] && $PROG config set idle "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1
 	v=$(uci_get stun);	[ -n "$v" ] && $PROG config set stun "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1
+
+	# 信令传输方式（auto / ws / poll）是 0.1.7 才加的键，老版本没有。
+	# 这里故意忽略 config set 的失败：升级前不能让 apply 整个挂掉，
+	# 值本身由 LuCI 的下拉框限制，不会出现非法值。
+	v=$(uci_get transport)
+	if [ -n "$v" ] && [ "$v" != auto ]; then
+		$PROG config set transport "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1 || true
+	else
+		$PROG config unset transport --data-dir "$DATA_DIR" >/dev/null 2>&1 || true
+	fi
 
 	v=$(uci_get routes)
 	if [ -n "$v" ]; then

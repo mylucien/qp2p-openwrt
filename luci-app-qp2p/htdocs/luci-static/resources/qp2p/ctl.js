@@ -56,6 +56,33 @@ function show(title, res) {
 	return res;
 }
 
+/*
+ * 操作结果用模态框：通知几秒就消失，而 join / 建网 / 换令牌成功后往往要
+ * 立刻重启或刷新，用户根本来不及看。返回 Promise，点「好」才继续后续动作。
+ */
+function showResult(title, res, doneLabel) {
+	var text = [ res.stdout, res.stderr ].filter(function (s) { return s !== ''; }).join('\n\n');
+	var ok = res.code == 0;
+
+	if (!text)
+		text = ok ? '完成' : '失败（没有输出）';
+
+	return new Promise(function (resolve) {
+		ui.showModal(title, [
+			E('pre', {
+				'style': 'white-space:pre-wrap;word-break:break-all;margin:0;' +
+					'font-family:monospace;font-size:90%;line-height:1.5;max-height:22em;overflow:auto'
+			}, text),
+			E('div', { 'class': 'right', 'style': 'margin-top:1em' }, [
+				E('button', {
+					'class': 'btn cbi-button cbi-button-apply',
+					'click': function () { ui.hideModal(); resolve(res); }
+				}, doneLabel || (ok ? '好' : '知道了'))
+			])
+		]);
+	});
+}
+
 /* 危险操作前的确认框，返回 Promise<boolean> */
 function confirm(title, message, okLabel) {
 	return new Promise(function (resolve) {
@@ -118,6 +145,7 @@ return baseclass.extend({
 	exec: run,
 	json: runJson,
 	show: show,
+	showResult: showResult,
 	confirm: confirm,
 	prompt: prompt,
 

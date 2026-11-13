@@ -121,8 +121,9 @@ return view.extend({
 			self.rawText = (res && res.raw) || (res && res.error) || '';
 			self.fill(state.peers || []);
 
-			if (!silent && res && res.ok == 0)
-				ctl.show('刷新失败', { code: 1, stdout: '', stderr: res.error || '未知错误' });
+		if (!silent && res && res.ok == 0)
+			return ctl.showResult('刷新失败',
+				{ code: 1, stdout: '', stderr: res.error || '未知错误' });
 		});
 	},
 
