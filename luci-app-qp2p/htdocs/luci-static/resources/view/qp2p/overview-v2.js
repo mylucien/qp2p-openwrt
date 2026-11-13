@@ -4,7 +4,7 @@
 'require uci';
 'require ui';
 'require dom';
-'require qp2p.ctl as ctl';
+'require qp2p.ctl-v2 as ctl';
 
 /*
  * 概览页（设计稿 v2）：状态横幅 + 四格统计 + 成员列表 + 最近动态。

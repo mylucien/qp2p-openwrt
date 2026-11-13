@@ -2,7 +2,7 @@
 'require view';
 'require uci';
 'require ui';
-'require qp2p.ctl as ctl';
+'require qp2p.ctl-v2 as ctl';
 
 /*
  * 设置页（设计稿 v2）：基础 / 高级设置（折叠）/ 危险操作 三块。

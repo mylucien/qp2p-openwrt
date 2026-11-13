@@ -3,7 +3,7 @@
 'require poll';
 'require dom';
 'require ui';
-'require qp2p.ctl as ctl';
+'require qp2p.ctl-v2 as ctl';
 
 /* 日志页（设计稿 v2）：工具条 + 自动滚动 + 按级别着色的日志行 */
 

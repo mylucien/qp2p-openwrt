@@ -3,7 +3,7 @@
 'require view';
 'require uci';
 'require ui';
-'require qp2p.ctl as ctl';
+'require qp2p.ctl-v2 as ctl';
 
 var RE_IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 var RE_CIDR = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/;

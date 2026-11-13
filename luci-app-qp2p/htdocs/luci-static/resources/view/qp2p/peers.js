@@ -3,7 +3,7 @@
 'require poll';
 'require dom';
 'require ui';
-'require qp2p.ctl as ctl';
+'require qp2p.ctl-v2 as ctl';
 
 return view.extend({
 	load: function () {
