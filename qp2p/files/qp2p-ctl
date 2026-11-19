@@ -284,6 +284,13 @@ do_apply() {
 	echo "✓ 设置已写入 $DATA_DIR/config.toml"
 }
 
+# 只把 UCI 落盘，不重启、不触发 procd。给 LuCI 的「仅保存」用。
+# （LuCI 的 uci.save() 只是推进 ubus 暂存区 /tmp/.uci，不 commit 会丢。）
+do_commit() {
+	uci commit qp2p 2>/dev/null || { echo "保存失败：uci commit qp2p"; return 1; }
+	echo "已保存到 /etc/config/qp2p（服务未重启）"
+}
+
 # ---------------------------------------------------------------- 入网 / 建网 / 换令牌
 
 do_join() {
@@ -459,6 +466,7 @@ case "$action" in
 	state)		do_state ;;
 	refresh)	do_refresh ;;
 	apply)		do_apply ;;
+	commit)		do_commit ;;
 	join)		do_join "${1:-}" "${2:-}" "${3:-}" "${4:-}" ;;
 	create)		do_create "${1:-}" "${2:-}" ;;
 	rotate)		do_rotate "${1:-}" "${2:-}" ;;
@@ -474,6 +482,7 @@ case "$action" in
 		  state            当前状态（JSON，不发网络请求）
 		  refresh          向信令服务刷新成员，然后吐 state
 		  apply            把 UCI 设置写进 config.toml
+		  commit           把 UCI 落盘，不重启服务
 		  join <令牌>      用令牌入网
 		  create <网络名> <管理密钥>
 		  rotate <管理密钥> [新密钥]

@@ -24,7 +24,7 @@
 		"order": 20,
 		"action": {
 			"type": "view",
-			"path": "qp2p/settings-v6"
+			"path": "qp2p/settings-v7"
 		}
 	},
 
