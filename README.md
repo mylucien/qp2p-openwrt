@@ -50,25 +50,27 @@ make package/qp2p/compile V=s
 make package/luci-app-qp2p/compile V=s
 ```
 
-版本是**编译时**从 GitHub API 取的最新 release，缓存 30 分钟：
+版本是**编译时**从 GitHub API 取的**最新正式版** release，缓存 30 分钟：
 
-- 不能查 `/releases/latest` —— 它跳过预发布，而上游 CI 每次 push 发的都是预发布；
-- 也不能只取 `/releases?per_page=1` 的第一条 —— 那个接口的返回顺序不是按时间，
-  真正最新的一条不一定在最前面（实测 `v0.1.2+78` 排在 `v0.1.2` 后面）；
-- 所以拉一页（20 条），按 `published_at` 自己排，取最后一条。
-- 缓存文件：`tmp/.qp2p-latest-tag`，想立刻重新取就删掉它
-- 想锁定某个版本：`make package/qp2p/compile QP2P_TAG_FULL=0.1.2`
+- 查 `/releases/latest`，由 GitHub 直接给出最新非预发布、非草稿版本；
+  上游 CI 每次 push 发的 `v0.1.x+N` 预发布不会进包；
+- 不走 `/releases` 列表：那个接口返回顺序不按时间，按 `published_at` 排序
+  取到的往往是预发布，不是正式版；
+- 缓存文件：`tmp/.qp2p-stable-tag`，想立刻重新取就删掉它
+- 想锁定某个版本：`make package/qp2p/compile QP2P_TAG_FULL=0.1.15`
+  （手动指定时也可以填带 `+N` 的预发布 tag）
 - 离线编译会直接报错（版本号拿不到），这是有意的
 
-tag 里的 `+78` 是 CI 的构建号：
+默认取到的是正式版，`PKG_RELEASE` 就是 `1`：
 
 | tag | `PKG_VERSION` | `PKG_RELEASE` | ipk 文件名 |
 |---|---|---|---|
-| `v0.1.2+78` | `0.1.2` | `78` | `qp2p_0.1.2-78_aarch64_cortex-a53.ipk` |
-| `v0.1.3`（正式版） | `0.1.3` | `1` | `qp2p_0.1.3-1_aarch64_cortex-a53.ipk` |
+| `v0.1.15`（正式版，默认） | `0.1.15` | `1` | `qp2p_0.1.15-1_aarch64_cortex-a53.ipk` |
+| `v0.1.15+181`（手动指定预发布） | `0.1.15` | `181` | `qp2p_0.1.15-181_aarch64_cortex-a53.ipk` |
 
-构建号不进资产名（资产还是 `qp2p-0.1.2-linux-aarch64-static`），但要进
-`PKG_RELEASE`，否则两次构建的 ipk 版本完全一样，opkg 不会升级。
+tag 里的 `+181` 是 CI 构建号，不进资产名（资产都是
+`qp2p-0.1.15-linux-aarch64-static`），但要进 `PKG_RELEASE`，否则两次构建的
+ipk 版本完全一样，opkg 不会升级。
 
 架构映射：
 
@@ -80,8 +82,13 @@ tag 里的 `+78` 是 CI 的构建号：
 
 下载后会对着同版本的 `SHA256SUMS.txt` 校验，对不上就停。
 
-> **顺序**：aarch64 的资产是这次才加进上游 CI 的。上游 main 上每次 push 都会发
-> 一个带 aarch64 的预发布，所以推完 CI 改动后等那次构建绿了，就能编 ARM 包了。
+> **注意**：上游每个正式版都同时带 `x86_64` 和 `aarch64` 静态二进制。因为只取
+> 正式版，CI 的 `+N` 预发布再新也不会进包；要尝鲜得用
+> `QP2P_TAG_FULL=<预发布 tag>` 手动指定。
+>
+> 另外 `PKG_HASH:=skip`，同一版本号的预发布和正式版资产又是同名文件，从预发布
+> 切到正式版后第一次编译前，建议清一下 `dl/qp2p-*.static` 缓存，免得复用旧
+> 二进制（`SHA256SUMS.txt` 校验会拦住并报错）。
 
 ## 4. 装完怎么用
 
