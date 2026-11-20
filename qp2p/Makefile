@@ -23,21 +23,37 @@ QP2P_API:=https://api.github.com/repos/$(QP2P_REPO)/releases/latest
 # 换个名字就不会在 30 分钟内继续被读出来。
 QP2P_TAG_CACHE:=$(TOPDIR)/tmp/.qp2p-stable-tag
 
+# 环境里有 GITHUB_TOKEN 就带上，API 限额从 60/h 提到 5000/h。
+# CI 不配也没关系，下面还有页面重定向和旧缓存两级回退。
+QP2P_AUTH:=$(if $(GITHUB_TOKEN),-H "Authorization: Bearer $(GITHUB_TOKEN)")
+
 # 取最新正式版的 tag（去掉前导 v），缓存 30 分钟，避免 make 每次解析都打网络。
 #
-# 之所以换掉原来的 /releases 列表：列表返回顺序不按时间，按 published_at
-# 排序取到的常常是 CI 的 +N 预发布；/releases/latest 由 GitHub 直接给出
-# 最新非预发布、非草稿版本，正好是我们要的，也不用再自己排序。
-# (GitHub 按 created_at 判定 latest；本项目正式版按发布顺序创建，实测一致。)
+# /releases/latest 由 GitHub 直接给出最新非预发布、非草稿版本，不用自己排序。
+# 但它是 API，匿名访问只有 60 次/小时，CI 共享 IP 很容易 403。取不到时按顺序回退：
+#   1. API
+#   2. github.com/.../releases/latest 的 302 Location（不走 API 限额）
+#   3. 缓存里上一次成功的 tag（即使过期）
+# 只有真的取到非空 tag 才写缓存，失败不会把旧缓存清空。
 QP2P_TAG_FULL:=$(strip $(shell \
-	if [ -s "$(QP2P_TAG_CACHE)" ] && [ -z "$$(find "$(QP2P_TAG_CACHE)" -mmin +30 2>/dev/null)" ]; then \
-		cat "$(QP2P_TAG_CACHE)"; \
+	cache="$(QP2P_TAG_CACHE)"; \
+	if [ -s "$$cache" ] && [ -z "$$(find "$$cache" -mmin +30 2>/dev/null)" ]; then \
+		cat "$$cache"; \
 	else \
-		mkdir -p "$(TOPDIR)/tmp" 2>/dev/null; \
-		curl -fsSL --max-time 25 "$(QP2P_API)" 2>/dev/null \
+		mkdir -p "$$(dirname "$$cache")" 2>/dev/null; \
+		tag=$$(curl -fsSL --retry 3 --retry-delay 2 --max-time 25 $(QP2P_AUTH) "$(QP2P_API)" 2>/dev/null \
 			| awk '/"tag_name":/ { t = $$0; sub(/^.*"tag_name": *"/, "", t); sub(/".*$$/, "", t); print t; exit }' \
-			| sed 's/^v//' \
-			| tee "$(QP2P_TAG_CACHE)" 2>/dev/null; \
+			| sed 's/^v//'); \
+		if [ -z "$$tag" ]; then \
+			tag=$$(curl -fsS --retry 2 --retry-delay 1 --max-time 20 -o /dev/null \
+				-w '%{redirect_url}' "https://github.com/$(QP2P_REPO)/releases/latest" 2>/dev/null \
+				| sed -n 's#.*/tag/##p' | sed 's/^v//'); \
+		fi; \
+		if [ -n "$$tag" ]; then \
+			printf '%s' "$$tag" | tee "$$cache" 2>/dev/null; \
+		elif [ -s "$$cache" ]; then \
+			cat "$$cache"; \
+		fi; \
 	fi))
 
 # 正式版 tag 形如 0.1.15，PKG_RELEASE 就是 1。手动指定预发布时仍可能带 +构建号
@@ -52,8 +68,10 @@ else ifeq ($(ARCH),x86_64)
   QP2P_ARCH:=x86_64
 endif
 
-PKG_SOURCE:=$(if $(QP2P_ARCH),qp2p-$(PKG_VERSION)-linux-$(QP2P_ARCH)-static,qp2p-$(PKG_VERSION)-unsupported)
-PKG_SOURCE_URL:=https://github.com/$(QP2P_REPO)/releases/download/v$(QP2P_TAG_FULL)/
+# tag 取不到时不要拼出 qp2p-0.0.0 / download/v/ 去 404：
+# 换成一个一眼能看懂的文件名 + 必然失败的地址，日志里直接指向原因。
+PKG_SOURCE:=$(if $(QP2P_TAG_FULL),$(if $(QP2P_ARCH),qp2p-$(PKG_VERSION)-linux-$(QP2P_ARCH)-static,qp2p-$(PKG_VERSION)-unsupported),qp2p-TAG-FETCH-FAILED)
+PKG_SOURCE_URL:=$(if $(QP2P_TAG_FULL),https://github.com/$(QP2P_REPO)/releases/download/v$(QP2P_TAG_FULL)/,https://invalid.invalid/qp2p-tag-fetch-failed/)
 # 版本每次构建都可能变，哈希没法钉死；校验放在 Build/Prepare 里对着 SHA256SUMS.txt 做。
 PKG_HASH:=skip
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
@@ -84,6 +102,7 @@ endef
 define Build/Prepare
 	@[ -n "$(QP2P_TAG_FULL)" ] || { \
 		echo "ERROR: 取不到 $(QP2P_REPO) 的最新正式版 release（GitHub API 不通或限流）。"; \
+		echo "       环境里有 GITHUB_TOKEN 时会自动带上（限额 60/h → 5000/h）。"; \
 		echo "       手动指定版本再编译：make package/qp2p/compile QP2P_TAG_FULL=0.1.15"; \
 		exit 1; }
 	@[ -n "$(QP2P_ARCH)" ] || { \
