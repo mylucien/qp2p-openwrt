@@ -134,6 +134,7 @@ peers_json() {
 
 do_state() {
 	local running=0 enabled joined=0 version dev mtu bind port idle routes stun name transport
+	local congestion busy_poll
 	local lan_access peer_to_lan lan_zone
 
 	is_running && running=1
@@ -154,6 +155,8 @@ do_state() {
 	stun=$(uci_get stun)
 	name=$(uci_get name)
 	transport=$(uci_get transport);	transport=${transport:-auto}
+	congestion=$(uci_get congestion);	congestion=${congestion:-cubic}
+	busy_poll=$(uci_get busy_poll);		busy_poll=${busy_poll:-0}
 	lan_access=$(uci_get_bool lan_access 1)
 	peer_to_lan=$(uci_get_bool peer_to_lan 0)
 	lan_zone=$(uci_get lan_zone);	lan_zone=${lan_zone:-lan}
@@ -165,6 +168,7 @@ do_state() {
 "dev":$(jstr "$dev"),"mtu":$mtu,"bind":$(jstr "$bind"),"port":$port,"idle":$idle,
 "routes":$(jstr "$routes"),"stun":$(jstr "$stun"),"name":$(jstr "$name"),
 "transport":$(jstr "$transport"),
+"congestion":$(jstr "$congestion"),"busy_poll":$(jstr "$busy_poll"),
 "lan_access":$lan_access,"peer_to_lan":$peer_to_lan,"lan_zone":$(jstr "$lan_zone"),
 "peers":$(peers_json)}
 EOF
@@ -261,6 +265,21 @@ do_apply() {
 	else
 		$PROG config unset transport --data-dir "$DATA_DIR" >/dev/null 2>&1 || true
 	fi
+
+	# 拥塞控制 / 忙轮询是 0.1.16 之后才加的键，老版本不认识。
+	# 和 transport 一样忽略失败，别让一次 apply 整个挂掉。
+	v=$(uci_get congestion)
+	if [ -n "$v" ] && [ "$v" != cubic ]; then
+		$PROG config set congestion "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1 || true
+	else
+		$PROG config unset congestion --data-dir "$DATA_DIR" >/dev/null 2>&1 || true
+	fi
+
+	v=$(uci_get busy_poll)
+	case "$v" in
+		''|0)	$PROG config unset busy_poll --data-dir "$DATA_DIR" >/dev/null 2>&1 || true ;;
+		*)	$PROG config set busy_poll "$v" --data-dir "$DATA_DIR" >/dev/null 2>&1 || true ;;
+	esac
 
 	v=$(uci_get routes)
 	if [ -n "$v" ]; then
